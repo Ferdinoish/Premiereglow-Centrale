@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
-import { motion } from 'motion/react';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Scissors, 
   Sparkles, 
@@ -21,8 +21,75 @@ import {
   Menu,
   X,
   Palette,
-  UserCheck
+  UserCheck,
+  Calendar as CalendarIcon,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
+import { format, addDays, startOfToday, isBefore, parseISO } from 'date-fns';
+import { 
+  db, 
+  auth, 
+  collection, 
+  addDoc, 
+  onSnapshot, 
+  query, 
+  where, 
+  Timestamp,
+  onAuthStateChanged,
+  signInWithGoogle
+} from './firebase';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 const services = [
   {
@@ -94,6 +161,129 @@ const features = [
 
 export default function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  
+  // Booking Form State
+  const [bookingData, setBookingData] = useState({
+    name: '',
+    phone: '',
+    serviceId: '',
+    serviceName: '',
+    date: format(new Date(), 'yyyy-MM-dd'),
+    time: '',
+    notes: ''
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [bookingStatus, setBookingStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [existingBookings, setExistingBookings] = useState<any[]>([]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Real-time listener for booked slots on the selected date to show availability
+  useEffect(() => {
+    if (!bookingData.date) return;
+
+    const q = query(
+      collection(db, 'booked_slots'),
+      where('date', '==', bookingData.date)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const slots = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setExistingBookings(slots);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'booked_slots');
+    });
+
+    return () => unsubscribe();
+  }, [bookingData.date]);
+
+  const timeSlots = [
+    "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00"
+  ];
+
+  const handleBookingSubmit = (e: any) => {
+    e.preventDefault();
+    if (!bookingData.serviceId || !bookingData.time) {
+      setBookingStatus('error');
+      setErrorMessage('Please select a service and time slot.');
+      return;
+    }
+    setShowConfirmation(true);
+  };
+
+  const confirmBooking = async () => {
+    setIsSubmitting(true);
+    setBookingStatus('idle');
+    setShowConfirmation(false);
+
+    try {
+      // 1. Create the appointment (private)
+      await addDoc(collection(db, 'appointments'), {
+        clientName: bookingData.name,
+        clientPhone: bookingData.phone,
+        serviceId: bookingData.serviceId,
+        serviceName: bookingData.serviceName,
+        date: bookingData.date,
+        time: bookingData.time,
+        notes: bookingData.notes,
+        status: 'pending',
+        createdAt: Timestamp.now(),
+        uid: user?.uid || null
+      });
+
+      // 2. Create the public slot record for availability
+      await addDoc(collection(db, 'booked_slots'), {
+        date: bookingData.date,
+        time: bookingData.time
+      });
+
+      // 3. Send email notification via backend
+      try {
+        await fetch('/api/notify-booking', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: bookingData.name,
+            phone: bookingData.phone,
+            service: bookingData.serviceName,
+            date: bookingData.date,
+            time: bookingData.time,
+            notes: bookingData.notes
+          }),
+        });
+      } catch (emailError) {
+        console.error('Failed to send email notification:', emailError);
+        // We don't fail the whole booking if email fails, just log it
+      }
+
+      setBookingStatus('success');
+      setBookingData({
+        name: '',
+        phone: '',
+        serviceId: '',
+        serviceName: '',
+        date: format(new Date(), 'yyyy-MM-dd'),
+        time: '',
+        notes: ''
+      });
+    } catch (error) {
+      setBookingStatus('error');
+      setErrorMessage('Failed to book appointment. Please try again.');
+      handleFirestoreError(error, OperationType.CREATE, 'appointments');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const fadeIn = {
     initial: { opacity: 0, y: 20 },
@@ -435,39 +625,152 @@ export default function App() {
             transition={{ delay: 0.2 }}
             className="bg-white/5 backdrop-blur-xl p-8 md:p-12 rounded-3xl border border-white/10"
           >
-            <form className="grid md:grid-cols-2 gap-6" onSubmit={(e) => e.preventDefault()}>
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Name</label>
-                <input type="text" placeholder="Your Full Name" className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white placeholder:text-white/30" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Phone</label>
-                <input type="tel" placeholder="09XX XXX XXXX" className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white placeholder:text-white/30" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Service</label>
-                <select className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white/70">
-                  <option className="bg-soft-black">Select a Service</option>
-                  <option className="bg-soft-black">Hair Artistry</option>
-                  <option className="bg-soft-black">Skin Rejuvenation</option>
-                  <option className="bg-soft-black">Nail Couture</option>
-                  <option className="bg-soft-black">Makeup Design</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Preferred Date</label>
-                <input type="date" className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white/70" />
-              </div>
-              <div className="md:col-span-2 space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Message</label>
-                <textarea rows={4} placeholder="Any special requests or details?" className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white placeholder:text-white/30"></textarea>
-              </div>
-              <div className="md:col-span-2 pt-4">
-                <button className="w-full bg-rose-gold text-white py-5 rounded-xl font-bold uppercase tracking-widest hover:bg-deep-rose transition-all glow-effect text-lg">
-                  Confirm Booking
+            {bookingStatus === 'success' ? (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="text-center py-12"
+              >
+                <div className="w-20 h-20 bg-rose-gold/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <CheckCircle2 className="w-10 h-10 text-rose-gold" />
+                </div>
+                <h3 className="text-3xl font-serif text-champagne mb-4">Booking Confirmed!</h3>
+                <p className="text-champagne/70 mb-8">We've received your request. Our team will contact you shortly to confirm your slot.</p>
+                <button 
+                  onClick={() => setBookingStatus('idle')}
+                  className="bg-rose-gold text-white px-8 py-3 rounded-full font-bold uppercase tracking-widest hover:bg-deep-rose transition-all"
+                >
+                  Book Another
                 </button>
-              </div>
-            </form>
+              </motion.div>
+            ) : (
+              <form className="grid md:grid-cols-2 gap-6" onSubmit={handleBookingSubmit}>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Name</label>
+                  <input 
+                    required
+                    type="text" 
+                    value={bookingData.name}
+                    onChange={(e) => setBookingData({...bookingData, name: e.target.value})}
+                    placeholder="Your Full Name" 
+                    className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white placeholder:text-white/30" 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Phone</label>
+                  <input 
+                    required
+                    type="tel" 
+                    value={bookingData.phone}
+                    onChange={(e) => setBookingData({...bookingData, phone: e.target.value})}
+                    placeholder="09XX XXX XXXX" 
+                    className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white placeholder:text-white/30" 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Service</label>
+                  <select 
+                    required
+                    value={bookingData.serviceName}
+                    onChange={(e) => setBookingData({...bookingData, serviceName: e.target.value, serviceId: e.target.value.toLowerCase().replace(/\s+/g, '-')})}
+                    className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white/70"
+                  >
+                    <option value="" className="bg-soft-black">Select a Service</option>
+                    {services.map((s, i) => (
+                      <option key={i} value={s.name} className="bg-soft-black">{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Preferred Date</label>
+                  <input 
+                    required
+                    type="date" 
+                    min={format(new Date(), 'yyyy-MM-dd')}
+                    value={bookingData.date}
+                    onChange={(e) => setBookingData({...bookingData, date: e.target.value})}
+                    className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white/70" 
+                  />
+                </div>
+                
+                <div className="md:col-span-2 space-y-4">
+                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Select Available Time Slot</label>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                    {timeSlots.map((slot) => {
+                      const isBooked = existingBookings.some(b => b.time === slot);
+                      const isSelected = bookingData.time === slot;
+                      
+                      return (
+                        <button
+                          key={slot}
+                          type="button"
+                          disabled={isBooked}
+                          onClick={() => setBookingData({...bookingData, time: slot})}
+                          className={`
+                            py-3 rounded-lg text-sm font-medium transition-all border
+                            ${isBooked 
+                              ? 'bg-white/5 border-white/5 text-white/20 cursor-not-allowed' 
+                              : isSelected
+                                ? 'bg-rose-gold border-rose-gold text-white shadow-lg scale-105'
+                                : 'bg-white/10 border-white/10 text-white/70 hover:border-rose-gold/50 hover:bg-white/15'
+                            }
+                          `}
+                        >
+                          {slot}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Message (Optional)</label>
+                  <textarea 
+                    rows={3} 
+                    value={bookingData.notes}
+                    onChange={(e) => setBookingData({...bookingData, notes: e.target.value})}
+                    placeholder="Any special requests or details?" 
+                    className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white placeholder:text-white/30"
+                  ></textarea>
+                </div>
+
+                {bookingStatus === 'error' && (
+                  <div className="md:col-span-2 flex items-center gap-2 text-rose-500 bg-rose-500/10 p-4 rounded-xl border border-rose-500/20">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                    <p className="text-sm">{errorMessage}</p>
+                  </div>
+                )}
+
+                <div className="md:col-span-2 pt-4">
+                  <button 
+                    disabled={isSubmitting}
+                    className="w-full bg-rose-gold text-white py-5 rounded-xl font-bold uppercase tracking-widest hover:bg-deep-rose transition-all glow-effect text-lg flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-6 h-6 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      'Confirm Booking'
+                    )}
+                  </button>
+                </div>
+                
+                {!user && (
+                  <div className="md:col-span-2 text-center mt-4">
+                    <p className="text-xs text-champagne/40 uppercase tracking-widest mb-3">Or sign in for faster booking</p>
+                    <button 
+                      type="button"
+                      onClick={signInWithGoogle}
+                      className="inline-flex items-center gap-2 text-champagne/80 hover:text-rose-gold transition-colors text-sm font-bold uppercase tracking-widest"
+                    >
+                      Sign in with Google
+                    </button>
+                  </div>
+                )}
+              </form>
+            )}
           </motion.div>
         </div>
       </section>
@@ -519,6 +822,69 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* Confirmation Modal */}
+      <AnimatePresence>
+        {showConfirmation && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowConfirmation(false)}
+              className="absolute inset-0 bg-soft-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl"
+            >
+              <div className="p-8">
+                <div className="w-16 h-16 bg-rose-gold/10 rounded-full flex items-center justify-center mb-6">
+                  <CalendarIcon className="w-8 h-8 text-rose-gold" />
+                </div>
+                <h3 className="text-2xl font-serif text-soft-black mb-2">Confirm Your Appointment</h3>
+                <p className="text-gray-500 text-sm mb-8">Please review your booking details before confirming.</p>
+                
+                <div className="space-y-4 mb-8">
+                  <div className="flex justify-between items-center py-3 border-b border-gray-100">
+                    <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Service</span>
+                    <span className="font-serif text-soft-black">{bookingData.serviceName}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-3 border-b border-gray-100">
+                    <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Date</span>
+                    <span className="font-serif text-soft-black">{format(parseISO(bookingData.date), 'MMMM dd, yyyy')}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-3 border-b border-gray-100">
+                    <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Time</span>
+                    <span className="font-serif text-soft-black">{bookingData.time}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-3 border-b border-gray-100">
+                    <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Client</span>
+                    <span className="font-serif text-soft-black">{bookingData.name}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <button 
+                    onClick={() => setShowConfirmation(false)}
+                    className="py-4 rounded-xl text-sm font-bold uppercase tracking-widest text-gray-400 hover:text-soft-black transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={confirmBooking}
+                    className="bg-rose-gold text-white py-4 rounded-xl font-bold uppercase tracking-widest hover:bg-deep-rose transition-all shadow-lg shadow-rose-gold/20"
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

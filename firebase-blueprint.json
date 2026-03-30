@@ -1,0 +1,59 @@
+{
+  "entities": {
+    "appointment": {
+      "title": "Appointment",
+      "description": "An appointment booked by a client.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the appointment." },
+        "clientName": { "type": "string", "description": "Name of the client." },
+        "clientPhone": { "type": "string", "description": "Phone number of the client." },
+        "serviceId": { "type": "string", "description": "ID of the service booked." },
+        "serviceName": { "type": "string", "description": "Name of the service booked." },
+        "date": { "type": "string", "format": "date", "description": "Date of the appointment (YYYY-MM-DD)." },
+        "time": { "type": "string", "description": "Time slot of the appointment (HH:mm)." },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled"], "description": "Status of the appointment." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when the appointment was created." },
+        "notes": { "type": "string", "description": "Additional notes from the client." }
+      },
+      "required": ["clientName", "clientPhone", "serviceId", "serviceName", "date", "time", "status", "createdAt"]
+    },
+    "service": {
+      "title": "Service",
+      "description": "A beauty service offered by the salon.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the service." },
+        "name": { "type": "string", "description": "Name of the service." },
+        "description": { "type": "string", "description": "Description of the service." },
+        "duration": { "type": "integer", "description": "Duration of the service in minutes." },
+        "price": { "type": "number", "description": "Price of the service." }
+      },
+      "required": ["name", "description", "duration", "price"]
+    },
+    "booked_slot": {
+      "title": "Booked Slot",
+      "description": "A public record of a booked time slot to show availability.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "time": { "type": "string" }
+      },
+      "required": ["date", "time"]
+    }
+  },
+  "firestore": {
+    "/appointments/{appointmentId}": {
+      "schema": "appointment",
+      "description": "Collection of booked appointments."
+    },
+    "/services/{serviceId}": {
+      "schema": "service",
+      "description": "Collection of available beauty services."
+    },
+    "/booked_slots/{slotId}": {
+      "schema": "booked_slot",
+      "description": "Publicly readable booked slots for availability checking."
+    }
+  }
+}

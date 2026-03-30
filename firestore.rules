@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: appointments
+    // Document ID: auto-generated
+    // Fields:
+    //   - clientName: string (required, 1-100 chars)
+    //   - clientPhone: string (required, 10-20 chars)
+    //   - serviceId: string (required)
+    //   - serviceName: string (required)
+    //   - date: string (required, YYYY-MM-DD)
+    //   - time: string (required, HH:mm)
+    //   - status: string (required, enum: ['pending', 'confirmed', 'cancelled'])
+    //   - createdAt: timestamp (required)
+    //   - notes: string (optional, < 500 chars)
+    //   - uid: string (optional, for owner tracking)
+    //
+    // Collection: services
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required, 1-100 chars)
+    //   - description: string (required, 1-500 chars)
+    //   - duration: number (required, positive)
+    //   - price: number (required, positive)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "libronferdinand@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isValidAppointment(data) {
+      return data.keys().hasAll(['clientName', 'clientPhone', 'serviceId', 'serviceName', 'date', 'time', 'status', 'createdAt']) &&
+             data.clientName is string && data.clientName.size() > 0 && data.clientName.size() <= 100 &&
+             data.clientPhone is string && data.clientPhone.size() >= 10 && data.clientPhone.size() <= 20 &&
+             data.serviceId is string &&
+             data.serviceName is string &&
+             data.date is string && data.date.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             data.time is string && data.time.matches("^\\d{2}:\\d{2}$") &&
+             data.status in ['pending', 'confirmed', 'cancelled'] &&
+             data.createdAt is timestamp &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 500));
+    }
+
+    function isValidService(data) {
+      return data.keys().hasAll(['name', 'description', 'duration', 'price']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.description is string && data.description.size() > 0 && data.description.size() <= 500 &&
+             data.duration is number && data.duration > 0 &&
+             data.price is number && data.price >= 0;
+    }
+
+    function isValidSlot(data) {
+      return data.keys().hasAll(['date', 'time']) &&
+             data.date is string && data.date.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             data.time is string && data.time.matches("^\\d{2}:\\d{2}$");
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /appointments/{appointmentId} {
+      // Appointments are private by default, but we might want users to see their own
+      // For this simple booking system, we'll allow creation by anyone (even unauthenticated for ease of use)
+      // but if we want it real-time and secure, we should probably require auth.
+      // The prompt says "real-time appointment booking system".
+      // Let's allow anyone to create a booking, but only admins can read all.
+      // If a user is logged in, they can read their own if we store uid.
+      
+      allow create: if isValidAppointment(request.resource.data);
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.uid == request.auth.uid);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /booked_slots/{slotId} {
+      allow read: if true; // Publicly readable for availability
+      allow create: if isValidSlot(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    match /services/{serviceId} {
+      allow read: if true; // Services are public
+      allow write: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+    
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
