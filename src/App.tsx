@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Scissors, 
@@ -24,7 +24,9 @@ import {
   UserCheck,
   Calendar as CalendarIcon,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Eye,
+  Droplets
 } from 'lucide-react';
 import { format, addDays, startOfToday, isBefore, parseISO } from 'date-fns';
 import { 
@@ -93,27 +95,69 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 
 const services = [
   {
+    icon: <Palette className="w-8 h-8" />,
+    name: "Acrylic nails",
+    description: "Durable and beautiful nail extensions with custom designs.",
+    link: "#booking"
+  },
+  {
     icon: <Scissors className="w-8 h-8" />,
-    name: "Hair Artistry",
-    description: "Precision cuts, luxury coloring, and professional styling tailored to your unique personality.",
+    name: "Balayage",
+    description: "Hand-painted highlights for a natural, sun-kissed look.",
     link: "#booking"
   },
   {
     icon: <Sparkles className="w-8 h-8" />,
-    name: "Skin Rejuvenation",
-    description: "Advanced facials and skin treatments designed to restore your natural radiance and glow.",
+    name: "Body waxing",
+    description: "Smooth and long-lasting hair removal for various body areas.",
+    link: "#booking"
+  },
+  {
+    icon: <Sparkles className="w-8 h-8" />,
+    name: "Brazilian waxing",
+    description: "Complete and professional hair removal for the bikini area.",
+    link: "#booking"
+  },
+  {
+    icon: <Eye className="w-8 h-8" />,
+    name: "Eyelash extensions",
+    description: "Enhance your eyes with fuller, longer, and natural-looking lashes.",
+    link: "#booking"
+  },
+  {
+    icon: <Scissors className="w-8 h-8" />,
+    name: "Hair extensions",
+    description: "Add length and volume to your hair with premium extensions.",
+    link: "#booking"
+  },
+  {
+    icon: <Scissors className="w-8 h-8" />,
+    name: "Hairstyling",
+    description: "Professional styling for everyday elegance or special occasions.",
+    link: "#booking"
+  },
+  {
+    icon: <Eye className="w-8 h-8" />,
+    name: "Lash lift",
+    description: "A semi-permanent treatment that gives your natural lashes an upward curl.",
     link: "#booking"
   },
   {
     icon: <Palette className="w-8 h-8" />,
-    name: "Nail Couture",
-    description: "Exquisite manicures and pedicures with premium polishes and artistic designs.",
+    name: "Pedicure",
+    description: "Relaxing foot care, nail shaping, and polish application.",
     link: "#booking"
   },
   {
-    icon: <UserCheck className="w-8 h-8" />,
-    name: "Makeup Design",
-    description: "Professional makeup application for weddings, events, or your everyday glamorous look.",
+    icon: <Droplets className="w-8 h-8" />,
+    name: "Shampoo & conditioning",
+    description: "Deep cleansing and nourishing treatments for healthy hair.",
+    link: "#booking"
+  },
+  {
+    icon: <Sparkles className="w-8 h-8" />,
+    name: "Waxing",
+    description: "Quick and effective hair removal services.",
     link: "#booking"
   }
 ];
@@ -167,6 +211,7 @@ export default function App() {
   // Booking Form State
   const [bookingData, setBookingData] = useState({
     name: '',
+    email: '',
     phone: '',
     serviceId: '',
     serviceName: '',
@@ -179,6 +224,11 @@ export default function App() {
   const [bookingStatus, setBookingStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [existingBookings, setExistingBookings] = useState<any[]>([]);
+  
+  // My Bookings State
+  const [showMyBookings, setShowMyBookings] = useState(false);
+  const [myBookings, setMyBookings] = useState<any[]>([]);
+  const [isLoadingBookings, setIsLoadingBookings] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -187,6 +237,34 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Fetch user bookings when modal is open
+  useEffect(() => {
+    if (user && showMyBookings) {
+      setIsLoadingBookings(true);
+      const q = query(
+        collection(db, 'appointments'),
+        where('uid', '==', user.uid)
+      );
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Sort client side: descending by date and time
+        bookings.sort((a: any, b: any) => {
+          const dateA = new Date(`${a.date}T${a.time}`).getTime();
+          const dateB = new Date(`${b.date}T${b.time}`).getTime();
+          return dateB - dateA;
+        });
+        setMyBookings(bookings);
+        setIsLoadingBookings(false);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'appointments');
+        setIsLoadingBookings(false);
+      });
+
+      return () => unsubscribe();
+    }
+  }, [user, showMyBookings]);
 
   // Real-time listener for booked slots on the selected date to show availability
   useEffect(() => {
@@ -207,9 +285,24 @@ export default function App() {
     return () => unsubscribe();
   }, [bookingData.date]);
 
-  const timeSlots = [
-    "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00"
-  ];
+  const groupedTimeSlots = useMemo(() => {
+    const groups: { hourLabel: string; slots: { value: string; label: string }[] }[] = [];
+    for (let i = 9; i <= 20; i++) {
+      const ampm = i >= 12 ? 'PM' : 'AM';
+      const displayHour = i > 12 ? i - 12 : i;
+      const hourSlots = [];
+      for (let m of [0, 15, 30, 45]) {
+        const timeString = `${i.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        const label = `${displayHour}:${m.toString().padStart(2, '0')} ${ampm}`;
+        hourSlots.push({ value: timeString, label });
+      }
+      groups.push({
+        hourLabel: `${displayHour}:00 ${ampm}`,
+        slots: hourSlots
+      });
+    }
+    return groups;
+  }, []);
 
   const handleBookingSubmit = (e: any) => {
     e.preventDefault();
@@ -218,6 +311,36 @@ export default function App() {
       setErrorMessage('Please select a service and time slot.');
       return;
     }
+    
+    // Validate time is within store hours (09:00 to 20:59)
+    const [hours, minutes] = bookingData.time.split(':').map(Number);
+    if (hours < 9 || hours > 20) {
+      setBookingStatus('error');
+      setErrorMessage('Please select a time within our open hours (9:00 AM - 9:00 PM).');
+      return;
+    }
+
+    // Check if time is already booked
+    if (existingBookings.some(b => b.time === bookingData.time)) {
+      setBookingStatus('error');
+      setErrorMessage('This exact time is already booked. Please select another time.');
+      return;
+    }
+
+    // Check if time is in the past
+    const isToday = bookingData.date === format(new Date(), 'yyyy-MM-dd');
+    const currentHour = new Date().getHours();
+    const currentMinute = new Date().getMinutes();
+    const [selectedHourStr, selectedMinuteStr] = bookingData.time.split(':');
+    const selectedHour = parseInt(selectedHourStr);
+    const selectedMinute = parseInt(selectedMinuteStr);
+
+    if (isToday && (selectedHour < currentHour || (selectedHour === currentHour && selectedMinute <= currentMinute))) {
+      setBookingStatus('error');
+      setErrorMessage('This time has already passed. Please select a future time.');
+      return;
+    }
+
     setShowConfirmation(true);
   };
 
@@ -230,13 +353,14 @@ export default function App() {
       // 1. Create the appointment (private)
       await addDoc(collection(db, 'appointments'), {
         clientName: bookingData.name,
+        clientEmail: bookingData.email,
         clientPhone: bookingData.phone,
         serviceId: bookingData.serviceId,
         serviceName: bookingData.serviceName,
         date: bookingData.date,
         time: bookingData.time,
         notes: bookingData.notes,
-        status: 'pending',
+        status: 'confirmed',
         createdAt: Timestamp.now(),
         uid: user?.uid || null
       });
@@ -254,6 +378,7 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: bookingData.name,
+            email: bookingData.email,
             phone: bookingData.phone,
             service: bookingData.serviceName,
             date: bookingData.date,
@@ -269,6 +394,7 @@ export default function App() {
       setBookingStatus('success');
       setBookingData({
         name: '',
+        email: '',
         phone: '',
         serviceId: '',
         serviceName: '',
@@ -309,6 +435,14 @@ export default function App() {
                 <a href="#services" className="text-champagne/80 hover:text-rose-gold transition-colors px-3 py-2 text-sm font-medium uppercase tracking-widest">Services</a>
                 <a href="#reviews" className="text-champagne/80 hover:text-rose-gold transition-colors px-3 py-2 text-sm font-medium uppercase tracking-widest">Reviews</a>
                 <a href="#location" className="text-champagne/80 hover:text-rose-gold transition-colors px-3 py-2 text-sm font-medium uppercase tracking-widest">Location</a>
+                {user && (
+                  <button 
+                    onClick={() => setShowMyBookings(true)}
+                    className="text-champagne/80 hover:text-rose-gold transition-colors px-3 py-2 text-sm font-medium uppercase tracking-widest"
+                  >
+                    My Bookings
+                  </button>
+                )}
                 <a href="#booking" className="bg-rose-gold text-white px-6 py-2 rounded-full text-sm font-medium uppercase tracking-widest hover:bg-deep-rose transition-all glow-effect">Book Now</a>
               </div>
             </div>
@@ -337,6 +471,17 @@ export default function App() {
               <a href="#services" onClick={() => setIsMenuOpen(false)} className="text-champagne block px-3 py-4 text-base font-medium border-b border-rose-gold/10">Services</a>
               <a href="#reviews" onClick={() => setIsMenuOpen(false)} className="text-champagne block px-3 py-4 text-base font-medium border-b border-rose-gold/10">Reviews</a>
               <a href="#location" onClick={() => setIsMenuOpen(false)} className="text-champagne block px-3 py-4 text-base font-medium border-b border-rose-gold/10">Location</a>
+              {user && (
+                <button 
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    setShowMyBookings(true);
+                  }}
+                  className="text-champagne block px-3 py-4 text-base font-medium border-b border-rose-gold/10 w-full text-left"
+                >
+                  My Bookings
+                </button>
+              )}
               <a href="#booking" onClick={() => setIsMenuOpen(false)} className="text-rose-gold block px-3 py-4 text-base font-bold">Book Now</a>
             </div>
           </motion.div>
@@ -347,8 +492,8 @@ export default function App() {
       <section className="relative h-screen flex items-center justify-center overflow-hidden">
         <div className="absolute inset-0 z-0">
           <img 
-            src="https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80&w=1920" 
-            alt="Luxury Salon Interior" 
+            src="https://i.postimg.cc/sfb3nNdx/storefront.jpg" 
+            alt="Premiereglow Storefront" 
             className="w-full h-full object-cover"
             referrerPolicy="no-referrer"
           />
@@ -572,7 +717,8 @@ export default function App() {
                   <Clock className="w-6 h-6 text-rose-gold flex-shrink-0" />
                   <div>
                     <h3 className="font-bold text-lg mb-1">Business Hours</h3>
-                    <p className="text-gray-600">Open Daily: 10:00 AM – 9:00 PM</p>
+                    <p className="text-gray-600">Open Daily: 9:00 AM – 9:00 PM</p>
+                    <p className="text-sm text-gray-500 italic mt-1">*Hours might differ during holidays</p>
                   </div>
                 </div>
                 <div className="flex gap-6">
@@ -585,11 +731,33 @@ export default function App() {
               </div>
               
               <div className="mt-12 p-8 bg-white rounded-2xl shadow-sm border border-rose-gold/10">
-                <h4 className="font-serif text-2xl mb-4 italic">Ready to glow?</h4>
-                <p className="text-gray-600 mb-6">We're located in a prime spot at CityMall Bacalso, easily accessible with ample parking for your convenience.</p>
-                <a href="#booking" className="text-rose-gold font-bold uppercase tracking-widest text-sm flex items-center hover:text-deep-rose transition-colors">
-                  Get Directions <ChevronRight className="w-4 h-4 ml-1" />
-                </a>
+                <h4 className="font-serif text-2xl mb-4 italic">Features & Amenities</h4>
+                <div className="grid sm:grid-cols-2 gap-y-4 gap-x-8 text-gray-600">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
+                    <span>Onsite services</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
+                    <span>Gender-neutral restroom</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
+                    <span>Restroom</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
+                    <span>LGBTQ+ friendly</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
+                    <span>Transgender safespace</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
+                    <span>Cash-only payments</span>
+                  </div>
+                </div>
               </div>
             </motion.div>
             
@@ -657,6 +825,17 @@ export default function App() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Email</label>
+                  <input 
+                    required
+                    type="email" 
+                    value={bookingData.email}
+                    onChange={(e) => setBookingData({...bookingData, email: e.target.value})}
+                    placeholder="your@email.com" 
+                    className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white placeholder:text-white/30" 
+                  />
+                </div>
+                <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Phone</label>
                   <input 
                     required
@@ -688,36 +867,67 @@ export default function App() {
                     type="date" 
                     min={format(new Date(), 'yyyy-MM-dd')}
                     value={bookingData.date}
-                    onChange={(e) => setBookingData({...bookingData, date: e.target.value})}
+                    onChange={(e) => setBookingData({...bookingData, date: e.target.value, time: ''})}
                     className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white/70" 
                   />
                 </div>
                 
                 <div className="md:col-span-2 space-y-4">
-                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Select Available Time Slot</label>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                    {timeSlots.map((slot) => {
-                      const isBooked = existingBookings.some(b => b.time === slot);
-                      const isSelected = bookingData.time === slot;
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Select Available Time Slot</label>
+                    <p className="text-xs text-champagne/40 ml-1 italic">Appointments are available during our regular business hours (9:00 AM - 9:00 PM). Hours might differ during holidays.</p>
+                  </div>
+                  <div className="space-y-6 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                    {groupedTimeSlots.map((group) => {
+                      const isToday = bookingData.date === format(new Date(), 'yyyy-MM-dd');
+                      const currentHour = new Date().getHours();
+                      const currentMinute = new Date().getMinutes();
                       
+                      // Check if all slots in this hour are unavailable
+                      const allSlotsUnavailable = group.slots.every(slot => {
+                        const [slotH, slotM] = slot.value.split(':').map(Number);
+                        const isPast = isToday && (slotH < currentHour || (slotH === currentHour && slotM <= currentMinute));
+                        const isExactBooked = existingBookings.some(b => b.time === slot.value);
+                        return isPast || isExactBooked;
+                      });
+
+                      if (allSlotsUnavailable) return null; // Hide the hour group if fully booked/past
+
                       return (
-                        <button
-                          key={slot}
-                          type="button"
-                          disabled={isBooked}
-                          onClick={() => setBookingData({...bookingData, time: slot})}
-                          className={`
-                            py-3 rounded-lg text-sm font-medium transition-all border
-                            ${isBooked 
-                              ? 'bg-white/5 border-white/5 text-white/20 cursor-not-allowed' 
-                              : isSelected
-                                ? 'bg-rose-gold border-rose-gold text-white shadow-lg scale-105'
-                                : 'bg-white/10 border-white/10 text-white/70 hover:border-rose-gold/50 hover:bg-white/15'
-                            }
-                          `}
-                        >
-                          {slot}
-                        </button>
+                        <div key={group.hourLabel} className="space-y-3">
+                          <h4 className="text-sm font-bold text-champagne/80 border-b border-white/10 pb-2">{group.hourLabel}</h4>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            {group.slots.map((slot) => {
+                              const isSelected = bookingData.time === slot.value;
+                              const isExactBooked = existingBookings.some(b => b.time === slot.value);
+                              
+                              const [slotH, slotM] = slot.value.split(':').map(Number);
+                              const isPast = isToday && (slotH < currentHour || (slotH === currentHour && slotM <= currentMinute));
+                              
+                              const isUnavailable = isExactBooked || isPast;
+                              
+                              return (
+                                <button
+                                  key={slot.value}
+                                  type="button"
+                                  disabled={isUnavailable}
+                                  onClick={() => setBookingData({...bookingData, time: slot.value})}
+                                  className={`
+                                    py-2 rounded-lg text-sm font-medium transition-all border
+                                    ${isUnavailable 
+                                        ? 'bg-white/5 border-white/5 text-white/20 cursor-not-allowed line-through decoration-white/20'
+                                        : isSelected
+                                          ? 'bg-rose-gold border-rose-gold text-white shadow-lg scale-105'
+                                          : 'bg-white/10 border-white/10 text-white/70 hover:border-rose-gold/50 hover:bg-white/15'
+                                    }
+                                  `}
+                                >
+                                  {slot.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       );
                     })}
                   </div>
@@ -858,11 +1068,24 @@ export default function App() {
                   </div>
                   <div className="flex justify-between items-center py-3 border-b border-gray-100">
                     <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Time</span>
-                    <span className="font-serif text-soft-black">{bookingData.time}</span>
+                    <span className="font-serif text-soft-black">
+                      {(() => {
+                        if (!bookingData.time) return '';
+                        const [h, m] = bookingData.time.split(':');
+                        const hour = parseInt(h);
+                        const ampm = hour >= 12 ? 'PM' : 'AM';
+                        const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
+                        return `${displayHour}:${m} ${ampm}`;
+                      })()}
+                    </span>
                   </div>
                   <div className="flex justify-between items-center py-3 border-b border-gray-100">
                     <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Client</span>
                     <span className="font-serif text-soft-black">{bookingData.name}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-3 border-b border-gray-100">
+                    <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Email</span>
+                    <span className="font-serif text-soft-black">{bookingData.email}</span>
                   </div>
                 </div>
 
@@ -880,6 +1103,153 @@ export default function App() {
                     Confirm
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* My Bookings Modal */}
+      <AnimatePresence>
+        {showMyBookings && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowMyBookings(false)}
+              className="absolute inset-0 bg-soft-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative bg-white w-full max-w-2xl max-h-[80vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+            >
+              <div className="p-6 sm:p-8 border-b border-gray-100 flex justify-between items-center">
+                <h3 className="text-2xl font-serif text-soft-black">My Bookings</h3>
+                <button 
+                  onClick={() => setShowMyBookings(false)}
+                  className="p-2 text-gray-400 hover:text-soft-black transition-colors rounded-full hover:bg-gray-100"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="p-6 sm:p-8 overflow-y-auto flex-1 custom-scrollbar bg-gray-50/50">
+                {isLoadingBookings ? (
+                  <div className="flex justify-center items-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-rose-gold"></div>
+                  </div>
+                ) : myBookings.length === 0 ? (
+                  <div className="text-center py-12">
+                    <CalendarIcon className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500">You don't have any bookings yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-8">
+                    {/* Upcoming Bookings */}
+                    {(() => {
+                      const upcoming = myBookings.filter(b => {
+                        const bookingDate = new Date(`${b.date}T${b.time}`);
+                        return bookingDate >= new Date();
+                      });
+                      
+                      if (upcoming.length === 0) return null;
+                      
+                      return (
+                        <div>
+                          <h4 className="text-sm font-bold uppercase tracking-widest text-rose-gold mb-4 flex items-center gap-2">
+                            <Sparkles className="w-4 h-4" /> Upcoming Appointments
+                          </h4>
+                          <div className="space-y-4">
+                            {upcoming.map(booking => (
+                              <div key={booking.id} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                                  <div>
+                                    <h5 className="font-serif text-lg text-soft-black mb-1">{booking.serviceName}</h5>
+                                    <div className="flex items-center gap-4 text-sm text-gray-500">
+                                      <span className="flex items-center gap-1">
+                                        <CalendarIcon className="w-4 h-4" />
+                                        {format(parseISO(booking.date), 'MMM dd, yyyy')}
+                                      </span>
+                                      <span className="flex items-center gap-1">
+                                        <Clock className="w-4 h-4" />
+                                        {(() => {
+                                          const [h, m] = booking.time.split(':');
+                                          const hour = parseInt(h);
+                                          const ampm = hour >= 12 ? 'PM' : 'AM';
+                                          const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
+                                          return `${displayHour}:${m} ${ampm}`;
+                                        })()}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                                      booking.status === 'confirmed' ? 'bg-green-100 text-green-700' : 
+                                      booking.status === 'cancelled' ? 'bg-red-100 text-red-700' : 
+                                      'bg-amber-100 text-amber-700'
+                                    }`}>
+                                      {booking.status || 'Pending'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Past Bookings */}
+                    {(() => {
+                      const past = myBookings.filter(b => {
+                        const bookingDate = new Date(`${b.date}T${b.time}`);
+                        return bookingDate < new Date();
+                      });
+                      
+                      if (past.length === 0) return null;
+                      
+                      return (
+                        <div>
+                          <h4 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4">Past Appointments</h4>
+                          <div className="space-y-4 opacity-75">
+                            {past.map(booking => (
+                              <div key={booking.id} className="bg-white p-5 rounded-2xl border border-gray-100">
+                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                                  <div>
+                                    <h5 className="font-serif text-lg text-gray-600 mb-1">{booking.serviceName}</h5>
+                                    <div className="flex items-center gap-4 text-sm text-gray-400">
+                                      <span className="flex items-center gap-1">
+                                        <CalendarIcon className="w-4 h-4" />
+                                        {format(parseISO(booking.date), 'MMM dd, yyyy')}
+                                      </span>
+                                      <span className="flex items-center gap-1">
+                                        <Clock className="w-4 h-4" />
+                                        {(() => {
+                                          const [h, m] = booking.time.split(':');
+                                          const hour = parseInt(h);
+                                          const ampm = hour >= 12 ? 'PM' : 'AM';
+                                          const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
+                                          return `${displayHour}:${m} ${ampm}`;
+                                        })()}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-gray-100 text-gray-500">
+                                      Completed
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
             </motion.div>
           </div>

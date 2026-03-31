@@ -14,7 +14,7 @@ async function startServer() {
 
   // API Route for booking notifications
   app.post("/api/notify-booking", async (req, res) => {
-    const { name, phone, service, date, time, notes } = req.body;
+    const { name, email, phone, service, date, time, notes } = req.body;
 
     const transporter = nodemailer.createTransport({
       service: "gmail",
@@ -24,7 +24,7 @@ async function startServer() {
       },
     });
 
-    const mailOptions = {
+    const ownerMailOptions = {
       from: `"Premiereglow Booking" <${process.env.EMAIL_USER}>`,
       to: "libronferdinand@gmail.com",
       subject: `New Appointment: ${service} - ${date} at ${time}`,
@@ -32,6 +32,7 @@ async function startServer() {
         <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
           <h2 style="color: #D4AF37;">New Appointment Request</h2>
           <p><strong>Client Name:</strong> ${name}</p>
+          <p><strong>Email:</strong> ${email || "Not provided"}</p>
           <p><strong>Phone:</strong> ${phone}</p>
           <p><strong>Service:</strong> ${service}</p>
           <p><strong>Date:</strong> ${date}</p>
@@ -43,13 +44,37 @@ async function startServer() {
       `,
     };
 
+    const clientMailOptions = email ? {
+      from: `"Premiereglow Centrale" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: `Booking Confirmed: ${service} at Premiereglow Centrale`,
+      html: `
+        <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+          <h2 style="color: #D4AF37;">Appointment Confirmed!</h2>
+          <p>Hi ${name},</p>
+          <p>Your appointment at Premiereglow Centrale has been confirmed. We look forward to seeing you!</p>
+          <p><strong>Service:</strong> ${service}</p>
+          <p><strong>Date:</strong> ${date}</p>
+          <p><strong>Time:</strong> ${time}</p>
+          <br/>
+          <p><strong>Location:</strong> 2nd Floor, CityMall Bacalso, Natalio B. Bacalso Ave, Cebu City</p>
+          <p>If you need to reschedule or cancel, please contact us at 0998 258 4178.</p>
+          <hr />
+          <p style="font-size: 12px; color: #666;">Premiereglow Centrale - Crafting Beauty with Elegance and Care</p>
+        </div>
+      `,
+    } : null;
+
     try {
       if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
         console.warn("Email credentials missing. Notification not sent.");
         return res.status(200).json({ success: true, message: "Booking saved, but email notification skipped due to missing credentials." });
       }
 
-      await transporter.sendMail(mailOptions);
+      await transporter.sendMail(ownerMailOptions);
+      if (clientMailOptions) {
+        await transporter.sendMail(clientMailOptions);
+      }
       res.status(200).json({ success: true });
     } catch (error) {
       console.error("Error sending email:", error);
