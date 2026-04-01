@@ -79,7 +79,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
       emailVerified: auth.currentUser?.emailVerified,
       isAnonymous: auth.currentUser?.isAnonymous,
       tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
         providerId: provider.providerId,
         displayName: provider.displayName,
         email: provider.email,
@@ -230,6 +230,20 @@ export default function App() {
   const [myBookings, setMyBookings] = useState<any[]>([]);
   const [isLoadingBookings, setIsLoadingBookings] = useState(false);
 
+  const availableDates = useMemo(() => {
+    const dates = [];
+    for (let i = 0; i < 14; i++) {
+      const d = addDays(startOfToday(), i);
+      dates.push({
+        value: format(d, 'yyyy-MM-dd'),
+        label: format(d, 'EEE'),
+        day: format(d, 'dd'),
+        month: format(d, 'MMM')
+      });
+    }
+    return dates;
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
@@ -361,6 +375,7 @@ export default function App() {
         time: bookingData.time,
         notes: bookingData.notes,
         status: 'confirmed',
+        reminderSent: false,
         createdAt: Timestamp.now(),
         uid: user?.uid || null
       });
@@ -860,16 +875,31 @@ export default function App() {
                     ))}
                   </select>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Preferred Date</label>
-                  <input 
-                    required
-                    type="date" 
-                    min={format(new Date(), 'yyyy-MM-dd')}
-                    value={bookingData.date}
-                    onChange={(e) => setBookingData({...bookingData, date: e.target.value, time: ''})}
-                    className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white/70" 
-                  />
+                <div className="space-y-4">
+                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Select Date</label>
+                  <div className="flex gap-3 overflow-x-auto pb-4 custom-scrollbar snap-x">
+                    {availableDates.map((d) => {
+                      const isSelected = bookingData.date === d.value;
+                      return (
+                        <button
+                          key={d.value}
+                          type="button"
+                          onClick={() => setBookingData({...bookingData, date: d.value, time: ''})}
+                          className={`
+                            flex-shrink-0 w-20 py-4 rounded-2xl border transition-all snap-start
+                            ${isSelected 
+                              ? 'bg-rose-gold border-rose-gold text-white shadow-lg scale-105' 
+                              : 'bg-white/5 border-white/10 text-white/70 hover:border-rose-gold/50 hover:bg-white/10'
+                            }
+                          `}
+                        >
+                          <span className="block text-[10px] uppercase font-bold tracking-tighter opacity-60 mb-1">{d.month}</span>
+                          <span className="block text-xl font-serif font-bold mb-1">{d.day}</span>
+                          <span className="block text-[10px] uppercase font-bold tracking-widest opacity-60">{d.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 
                 <div className="md:col-span-2 space-y-4">

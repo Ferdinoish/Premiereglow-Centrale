@@ -13,6 +13,7 @@
         "date": { "type": "string", "format": "date", "description": "Date of the appointment (YYYY-MM-DD)." },
         "time": { "type": "string", "description": "Time slot of the appointment (HH:mm)." },
         "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled"], "description": "Status of the appointment." },
+        "reminderSent": { "type": "boolean", "description": "Whether a 24h reminder has been sent." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when the appointment was created." },
         "notes": { "type": "string", "description": "Additional notes from the client." }
       },
