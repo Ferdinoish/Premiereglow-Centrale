@@ -28,70 +28,7 @@ import {
   Eye,
   Droplets
 } from 'lucide-react';
-import { format, addDays, startOfToday, isBefore, parseISO } from 'date-fns';
-import { 
-  db, 
-  auth, 
-  collection, 
-  addDoc, 
-  onSnapshot, 
-  query, 
-  where, 
-  Timestamp,
-  onAuthStateChanged,
-  signInWithGoogle
-} from './firebase';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
+import { format, parseISO } from 'date-fns';
 
 const services = [
   {
@@ -180,6 +117,43 @@ const testimonials = [
   }
 ];
 
+const branches = [
+  {
+    id: 'centrale',
+    name: 'Premiereglow Centrale',
+    location: '2nd Floor, CityMall Bacalso, Natalio B. Bacalso Ave, Cebu City, 6000 Cebu',
+    rating: 4.9,
+    reviews: 12,
+    hours: 'Open until 9 PM daily',
+    contact: '0998 258 4178',
+    image: 'https://images.unsplash.com/photo-1521590832167-7bfc17484d20?auto=format&fit=crop&q=80',
+    mapUrl: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3925.5564356453!2d123.894!3d10.3!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMTDCsDE4JzAwLjAiTiAxMjPCsDUzJzM4LjQiRQ!5e0!3m2!1sen!2sph!4v1600000000000!5m2!1sen!2sph'
+  },
+  {
+    id: 'banilad',
+    name: 'Premiereglow Banilad',
+    location: '2nd Floor, Gaisano Country Mall, Gov. M. Cuenco Ave, Cebu City, 6000 Cebu',
+    rating: 3.7,
+    reviews: 3,
+    hours: 'Open until 8 PM daily',
+    contact: '0998 258 4178',
+    facebook: 'facebook.com',
+    image: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80',
+    mapUrl: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3924.364567!2d123.908!3d10.34!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMTDCsDIwJzI0LjAiTiAxMjPCsDU0JzI4LjgiRQ!5e0!3m2!1sen!2sph!4v1600000000000!5m2!1sen!2sph'
+  },
+  {
+    id: 'south',
+    name: 'Premiereglow South',
+    location: '2nd Floor, South Town Center, Talisay, 6045 Cebu',
+    rating: 4.7,
+    reviews: 12,
+    hours: 'Open until 8 PM daily',
+    contact: '0998 258 4178',
+    image: 'https://images.unsplash.com/photo-1516975080661-418052bc0a56?auto=format&fit=crop&q=80',
+    mapUrl: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3926.2!2d123.84!3d10.25!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMTDCsDE1JzAwLjAiTiAxMjPCsDUwJzI0LjAiRQ!5e0!3m2!1sen!2sph!4v1600000000000!5m2!1sen!2sph'
+  }
+];
+
 const features = [
   {
     icon: <Star className="w-6 h-6 text-rose-gold" />,
@@ -205,14 +179,14 @@ const features = [
 
 export default function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [user, setUser] = useState<any>(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
   
   // Booking Form State
   const [bookingData, setBookingData] = useState({
     name: '',
     email: '',
     phone: '',
+    branchId: 'centrale',
+    branchName: 'Premiereglow Centrale',
     serviceId: '',
     serviceName: '',
     date: format(new Date(), 'yyyy-MM-dd'),
@@ -223,81 +197,9 @@ export default function App() {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [bookingStatus, setBookingStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
-  const [existingBookings, setExistingBookings] = useState<any[]>([]);
-  
-  // My Bookings State
-  const [showMyBookings, setShowMyBookings] = useState(false);
-  const [myBookings, setMyBookings] = useState<any[]>([]);
-  const [isLoadingBookings, setIsLoadingBookings] = useState(false);
 
-  const availableDates = useMemo(() => {
-    const dates = [];
-    for (let i = 0; i < 14; i++) {
-      const d = addDays(startOfToday(), i);
-      dates.push({
-        value: format(d, 'yyyy-MM-dd'),
-        label: format(d, 'EEE'),
-        day: format(d, 'dd'),
-        month: format(d, 'MMM')
-      });
-    }
-    return dates;
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setIsAuthReady(true);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Fetch user bookings when modal is open
-  useEffect(() => {
-    if (user && showMyBookings) {
-      setIsLoadingBookings(true);
-      const q = query(
-        collection(db, 'appointments'),
-        where('uid', '==', user.uid)
-      );
-
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        // Sort client side: descending by date and time
-        bookings.sort((a: any, b: any) => {
-          const dateA = new Date(`${a.date}T${a.time}`).getTime();
-          const dateB = new Date(`${b.date}T${b.time}`).getTime();
-          return dateB - dateA;
-        });
-        setMyBookings(bookings);
-        setIsLoadingBookings(false);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'appointments');
-        setIsLoadingBookings(false);
-      });
-
-      return () => unsubscribe();
-    }
-  }, [user, showMyBookings]);
-
-  // Real-time listener for booked slots on the selected date to show availability
-  useEffect(() => {
-    if (!bookingData.date) return;
-
-    const q = query(
-      collection(db, 'booked_slots'),
-      where('date', '==', bookingData.date)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const slots = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setExistingBookings(slots);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'booked_slots');
-    });
-
-    return () => unsubscribe();
-  }, [bookingData.date]);
+  // Map Tab State
+  const [activeMapTab, setActiveMapTab] = useState('centrale');
 
   const groupedTimeSlots = useMemo(() => {
     const groups: { hourLabel: string; slots: { value: string; label: string }[] }[] = [];
@@ -334,13 +236,6 @@ export default function App() {
       return;
     }
 
-    // Check if time is already booked
-    if (existingBookings.some(b => b.time === bookingData.time)) {
-      setBookingStatus('error');
-      setErrorMessage('This exact time is already booked. Please select another time.');
-      return;
-    }
-
     // Check if time is in the past
     const isToday = bookingData.date === format(new Date(), 'yyyy-MM-dd');
     const currentHour = new Date().getHours();
@@ -364,46 +259,38 @@ export default function App() {
     setShowConfirmation(false);
 
     try {
-      // 1. Create the appointment (private)
-      await addDoc(collection(db, 'appointments'), {
-        clientName: bookingData.name,
-        clientEmail: bookingData.email,
-        clientPhone: bookingData.phone,
-        serviceId: bookingData.serviceId,
-        serviceName: bookingData.serviceName,
+      const templateParams = {
+        name: bookingData.name,
+        email: bookingData.email,
+        phone: bookingData.phone,
+        branch: bookingData.branchName,
+        service: bookingData.serviceName,
         date: bookingData.date,
         time: bookingData.time,
-        notes: bookingData.notes,
-        status: 'confirmed',
-        reminderSent: false,
-        createdAt: Timestamp.now(),
-        uid: user?.uid || null
-      });
+        notes: bookingData.notes
+      };
 
-      // 2. Create the public slot record for availability
-      await addDoc(collection(db, 'booked_slots'), {
-        date: bookingData.date,
-        time: bookingData.time
-      });
+      const emailJsPayload = {
+        service_id: 'YOUR_EMAILJS_SERVICE_ID',
+        template_id: 'YOUR_EMAILJS_TEMPLATE_ID',
+        user_id: 'YOUR_EMAILJS_PUBLIC_KEY',
+        template_params: templateParams
+      };
 
-      // 3. Send email notification via backend
       try {
-        await fetch('/api/notify-booking', {
+        const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: bookingData.name,
-            email: bookingData.email,
-            phone: bookingData.phone,
-            service: bookingData.serviceName,
-            date: bookingData.date,
-            time: bookingData.time,
-            notes: bookingData.notes
-          }),
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(emailJsPayload)
         });
-      } catch (emailError) {
-        console.error('Failed to send email notification:', emailError);
-        // We don't fail the whole booking if email fails, just log it
+
+        if (!response.ok) {
+          console.warn('EmailJS not configured or failed, but proceeding with success UI as requested.');
+        }
+      } catch (e) {
+        console.warn('EmailJS fetch failed, proceeding with success UI as requested.', e);
       }
 
       setBookingStatus('success');
@@ -411,20 +298,37 @@ export default function App() {
         name: '',
         email: '',
         phone: '',
+        branchId: bookingData.branchId,
+        branchName: bookingData.branchName,
         serviceId: '',
         serviceName: '',
         date: format(new Date(), 'yyyy-MM-dd'),
         time: '',
         notes: ''
       });
+      setTimeout(() => setBookingStatus('idle'), 5000);
     } catch (error) {
+      console.error('Error submitting booking:', error);
       setBookingStatus('error');
-      setErrorMessage('Failed to book appointment. Please try again.');
-      handleFirestoreError(error, OperationType.CREATE, 'appointments');
+      setErrorMessage('Failed to submit booking. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const [showFloatingBook, setShowFloatingBook] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 600) {
+        setShowFloatingBook(true);
+      } else {
+        setShowFloatingBook(false);
+      }
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const fadeIn = {
     initial: { opacity: 0, y: 20 },
@@ -435,6 +339,26 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white">
+      {/* Floating Book Now Button */}
+      <AnimatePresence>
+        {showFloatingBook && (
+          <motion.a
+            href="#branches"
+            initial={{ opacity: 0, y: 50, scale: 0.8 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.8 }}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            className="fixed bottom-8 right-8 z-50 bg-rose-gold text-white p-4 rounded-full shadow-2xl flex items-center gap-2 group glow-effect"
+          >
+            <CalendarIcon className="w-6 h-6" />
+            <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-500 ease-in-out whitespace-nowrap font-bold uppercase tracking-widest text-xs">
+              Book Now
+            </span>
+          </motion.a>
+        )}
+      </AnimatePresence>
+
       {/* Navigation */}
       <nav className="fixed w-full z-50 bg-soft-black/90 backdrop-blur-md border-b border-rose-gold/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -447,18 +371,11 @@ export default function App() {
             <div className="hidden md:block">
               <div className="ml-10 flex items-baseline space-x-8">
                 <a href="#about" className="text-champagne/80 hover:text-rose-gold transition-colors px-3 py-2 text-sm font-medium uppercase tracking-widest">About</a>
+                <a href="#branches" className="text-champagne/80 hover:text-rose-gold transition-colors px-3 py-2 text-sm font-medium uppercase tracking-widest">Branches</a>
                 <a href="#services" className="text-champagne/80 hover:text-rose-gold transition-colors px-3 py-2 text-sm font-medium uppercase tracking-widest">Services</a>
                 <a href="#reviews" className="text-champagne/80 hover:text-rose-gold transition-colors px-3 py-2 text-sm font-medium uppercase tracking-widest">Reviews</a>
                 <a href="#location" className="text-champagne/80 hover:text-rose-gold transition-colors px-3 py-2 text-sm font-medium uppercase tracking-widest">Location</a>
-                {user && (
-                  <button 
-                    onClick={() => setShowMyBookings(true)}
-                    className="text-champagne/80 hover:text-rose-gold transition-colors px-3 py-2 text-sm font-medium uppercase tracking-widest"
-                  >
-                    My Bookings
-                  </button>
-                )}
-                <a href="#booking" className="bg-rose-gold text-white px-6 py-2 rounded-full text-sm font-medium uppercase tracking-widest hover:bg-deep-rose transition-all glow-effect">Book Now</a>
+                <a href="#branches" className="bg-rose-gold text-white px-6 py-2 rounded-full text-sm font-medium uppercase tracking-widest hover:bg-deep-rose transition-all glow-effect">Book Now</a>
               </div>
             </div>
 
@@ -483,21 +400,11 @@ export default function App() {
           >
             <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
               <a href="#about" onClick={() => setIsMenuOpen(false)} className="text-champagne block px-3 py-4 text-base font-medium border-b border-rose-gold/10">About</a>
+              <a href="#branches" onClick={() => setIsMenuOpen(false)} className="text-champagne block px-3 py-4 text-base font-medium border-b border-rose-gold/10">Branches</a>
               <a href="#services" onClick={() => setIsMenuOpen(false)} className="text-champagne block px-3 py-4 text-base font-medium border-b border-rose-gold/10">Services</a>
               <a href="#reviews" onClick={() => setIsMenuOpen(false)} className="text-champagne block px-3 py-4 text-base font-medium border-b border-rose-gold/10">Reviews</a>
               <a href="#location" onClick={() => setIsMenuOpen(false)} className="text-champagne block px-3 py-4 text-base font-medium border-b border-rose-gold/10">Location</a>
-              {user && (
-                <button 
-                  onClick={() => {
-                    setIsMenuOpen(false);
-                    setShowMyBookings(true);
-                  }}
-                  className="text-champagne block px-3 py-4 text-base font-medium border-b border-rose-gold/10 w-full text-left"
-                >
-                  My Bookings
-                </button>
-              )}
-              <a href="#booking" onClick={() => setIsMenuOpen(false)} className="text-rose-gold block px-3 py-4 text-base font-bold">Book Now</a>
+              <a href="#branches" onClick={() => setIsMenuOpen(false)} className="text-rose-gold block px-3 py-4 text-base font-bold">Book Now</a>
             </div>
           </motion.div>
         )}
@@ -527,11 +434,19 @@ export default function App() {
             <p className="text-xl md:text-2xl text-champagne/90 font-light mb-10 tracking-[0.2em] uppercase">
               Where Every Look Becomes a Statement
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <a href="#booking" className="bg-rose-gold text-white px-10 py-4 rounded-full text-sm font-bold uppercase tracking-widest hover:bg-deep-rose transition-all glow-effect">
+            <div className="flex flex-col sm:flex-row gap-6 justify-center">
+              <motion.a 
+                href="#branches" 
+                animate={{ 
+                  boxShadow: ["0 0 20px rgba(183, 110, 121, 0.4)", "0 0 40px rgba(183, 110, 121, 0.8)", "0 0 20px rgba(183, 110, 121, 0.4)"] 
+                }}
+                transition={{ duration: 2, repeat: Infinity }}
+                className="bg-rose-gold text-white px-12 py-5 rounded-full text-sm font-bold uppercase tracking-widest hover:bg-deep-rose transition-all flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
                 Book an Appointment
-              </a>
-              <a href="#services" className="border border-champagne text-champagne px-10 py-4 rounded-full text-sm font-bold uppercase tracking-widest hover:bg-champagne hover:text-soft-black transition-all">
+              </motion.a>
+              <a href="#services" className="border border-champagne text-champagne px-12 py-5 rounded-full text-sm font-bold uppercase tracking-widest hover:bg-champagne hover:text-soft-black transition-all flex items-center justify-center">
                 Explore Services
               </a>
             </div>
@@ -714,99 +629,148 @@ export default function App() {
         </div>
       </section>
 
-      {/* Location & Hours Section */}
-      <section id="location" className="py-24 bg-champagne/20">
+      {/* Branches Section */}
+      <section id="branches" className="py-24 bg-champagne/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-2 gap-16">
-            <motion.div {...fadeIn}>
-              <h2 className="text-4xl md:text-5xl font-serif mb-8">Visit Our Sanctuary</h2>
-              <div className="space-y-8">
-                <div className="flex gap-6">
-                  <MapPin className="w-6 h-6 text-rose-gold flex-shrink-0" />
-                  <div>
-                    <h3 className="font-bold text-lg mb-1">Address</h3>
-                    <p className="text-gray-600">2nd Floor, CityMall Bacalso, Natalio B. Bacalso Ave, Cebu City, 6000 Cebu</p>
-                  </div>
-                </div>
-                <div className="flex gap-6">
-                  <Clock className="w-6 h-6 text-rose-gold flex-shrink-0" />
-                  <div>
-                    <h3 className="font-bold text-lg mb-1">Business Hours</h3>
-                    <p className="text-gray-600">Open Daily: 9:00 AM – 9:00 PM</p>
-                    <p className="text-sm text-gray-500 italic mt-1">*Hours might differ during holidays</p>
-                  </div>
-                </div>
-                <div className="flex gap-6">
-                  <Phone className="w-6 h-6 text-rose-gold flex-shrink-0" />
-                  <div>
-                    <h3 className="font-bold text-lg mb-1">Contact</h3>
-                    <p className="text-gray-600">0998 258 4178</p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="mt-12 p-8 bg-white rounded-2xl shadow-sm border border-rose-gold/10">
-                <h4 className="font-serif text-2xl mb-4 italic">Features & Amenities</h4>
-                <div className="grid sm:grid-cols-2 gap-y-4 gap-x-8 text-gray-600">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
-                    <span>Onsite services</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
-                    <span>Gender-neutral restroom</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
-                    <span>Restroom</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
-                    <span>LGBTQ+ friendly</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
-                    <span>Transgender safespace</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-rose-gold" />
-                    <span>Cash-only payments</span>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-            
-            <motion.div 
-              {...fadeIn}
-              className="h-[500px] rounded-3xl overflow-hidden shadow-2xl border-4 border-white"
+          <div className="text-center mb-16">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true }}
+              className="inline-block px-4 py-1 rounded-full border border-rose-gold/30 text-rose-gold text-[10px] uppercase font-bold tracking-[0.3em] mb-6"
             >
-              <iframe 
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3925.617834468641!2d123.882414175841!3d10.292323968615364!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x33a999663737920b%3A0x7d06987f6e3c563e!2sCityMall%20Bacalso!5e0!3m2!1sen!2sph!4v1711765000000!5m2!1sen!2sph" 
-                width="100%" 
-                height="100%" 
-                style={{ border: 0 }} 
-                allowFullScreen={true} 
-                loading="lazy" 
-                referrerPolicy="no-referrer-when-downgrade"
-              ></iframe>
+              Our Locations
             </motion.div>
+            <motion.h2 {...fadeIn} className="text-4xl md:text-5xl font-serif mb-6 leading-tight">
+              Choose Your <span className="italic text-rose-gold">Branch</span>
+            </motion.h2>
           </div>
+
+          {/* Branch Cards */}
+          <div className="grid md:grid-cols-3 gap-8 mb-20">
+            {branches.map((branch, index) => {
+              const isSelected = bookingData.branchId === branch.id;
+              return (
+                <motion.div
+                  key={branch.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: index * 0.1 }}
+                  onClick={() => {
+                    setBookingData({ ...bookingData, branchId: branch.id, branchName: branch.name });
+                    setActiveMapTab(branch.id);
+                  }}
+                  className={`relative cursor-pointer rounded-3xl overflow-hidden bg-white transition-all duration-300 group ${
+                    isSelected 
+                      ? 'ring-2 ring-rose-gold shadow-[0_0_30px_rgba(183,110,121,0.3)] -translate-y-2' 
+                      : 'hover:shadow-xl hover:-translate-y-1 border border-rose-gold/10'
+                  }`}
+                >
+                  {isSelected && (
+                    <div className="absolute top-4 right-4 z-20 bg-rose-gold text-white p-1.5 rounded-full shadow-lg">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                  )}
+                  <div className="h-48 relative overflow-hidden">
+                    <img src={branch.image} alt={branch.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" referrerPolicy="no-referrer" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-soft-black/90 to-transparent"></div>
+                    <h3 className="absolute bottom-4 left-6 text-2xl font-serif text-white">{branch.name}</h3>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    <div className="flex items-center gap-2 text-rose-gold">
+                      <Star className="w-4 h-4 fill-current" />
+                      <span className="font-bold text-soft-black">{branch.rating}</span>
+                      <span className="text-sm text-gray-500">({branch.reviews} reviews)</span>
+                    </div>
+                    <div className="space-y-3 text-sm text-gray-600">
+                      <div className="flex gap-3">
+                        <MapPin className="w-4 h-4 text-rose-gold flex-shrink-0 mt-0.5" />
+                        <span>{branch.location}</span>
+                      </div>
+                      <div className="flex gap-3">
+                        <Clock className="w-4 h-4 text-rose-gold flex-shrink-0 mt-0.5" />
+                        <span>{branch.hours}</span>
+                      </div>
+                      <div className="flex gap-3">
+                        <Phone className="w-4 h-4 text-rose-gold flex-shrink-0 mt-0.5" />
+                        <span>{branch.contact}</span>
+                      </div>
+                    </div>
+                    <div className="pt-4 border-t border-gray-100 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-rose-gold">
+                      <Heart className="w-4 h-4" />
+                      LGBTQ+ Friendly
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+
+          {/* Map Tabs */}
+          <motion.div {...fadeIn} className="bg-white rounded-[2.5rem] p-4 md:p-8 shadow-xl border border-rose-gold/10">
+            <div className="flex flex-wrap justify-center gap-2 md:gap-4 mb-8">
+              {branches.map(branch => (
+                <button
+                  key={`tab-${branch.id}`}
+                  onClick={() => setActiveMapTab(branch.id)}
+                  className={`px-6 py-3 rounded-full text-sm font-bold uppercase tracking-widest transition-all ${
+                    activeMapTab === branch.id
+                      ? 'bg-rose-gold text-white shadow-lg'
+                      : 'bg-champagne/10 text-soft-black hover:bg-champagne/30'
+                  }`}
+                >
+                  {branch.name.replace('Premiereglow ', '')}
+                </button>
+              ))}
+            </div>
+            <div className="h-[400px] md:h-[500px] rounded-3xl overflow-hidden border-4 border-champagne/20">
+              {branches.map(branch => (
+                <iframe
+                  key={`map-${branch.id}`}
+                  src={branch.mapUrl}
+                  width="100%"
+                  height="100%"
+                  style={{ border: 0, display: activeMapTab === branch.id ? 'block' : 'none' }}
+                  allowFullScreen={true}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                ></iframe>
+              ))}
+            </div>
+          </motion.div>
         </div>
       </section>
 
       {/* Booking / Contact CTA Section */}
-      <section id="booking" className="py-24 bg-soft-black text-white relative overflow-hidden">
+      <section id="booking" className="py-32 bg-soft-black text-white relative overflow-hidden">
+        {/* Animated Background Elements */}
         <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10"></div>
+        <div className="absolute -top-24 -left-24 w-96 h-96 bg-rose-gold/10 rounded-full blur-[120px] animate-pulse"></div>
+        <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-rose-gold/10 rounded-full blur-[120px] animate-pulse delay-1000"></div>
+        
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="text-center mb-16">
-            <motion.h2 {...fadeIn} className="text-4xl md:text-6xl font-serif mb-6 text-champagne">Ready to Glow?</motion.h2>
-            <motion.p {...fadeIn} transition={{ delay: 0.1 }} className="text-xl text-champagne/70 font-light">Book Your Appointment Today</motion.p>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true }}
+              className="inline-block px-4 py-1 rounded-full border border-rose-gold/30 text-rose-gold text-[10px] uppercase font-bold tracking-[0.3em] mb-6"
+            >
+              Exclusive Experience
+            </motion.div>
+            <motion.h2 {...fadeIn} className="text-5xl md:text-7xl font-serif mb-6 text-champagne leading-tight">
+              Ready to <span className="italic text-rose-gold">Glow?</span>
+            </motion.h2>
+            <motion.p {...fadeIn} transition={{ delay: 0.1 }} className="text-xl text-champagne/70 font-light max-w-2xl mx-auto">
+              Secure your spot at Premiereglow Centrale and let our experts transform your look.
+            </motion.p>
           </div>
 
           <motion.div 
             {...fadeIn}
             transition={{ delay: 0.2 }}
-            className="bg-white/5 backdrop-blur-xl p-8 md:p-12 rounded-3xl border border-white/10"
+            className="bg-white/10 backdrop-blur-2xl p-8 md:p-16 rounded-[2.5rem] border border-white/20 shadow-[0_0_50px_rgba(0,0,0,0.3)]"
           >
             {bookingStatus === 'success' ? (
               <motion.div 
@@ -862,6 +826,23 @@ export default function App() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Branch</label>
+                  <select 
+                    required
+                    value={bookingData.branchId}
+                    onChange={(e) => {
+                      const branch = branches.find(b => b.id === e.target.value);
+                      setBookingData({...bookingData, branchId: e.target.value, branchName: branch?.name || ''});
+                      setActiveMapTab(e.target.value);
+                    }}
+                    className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white/70"
+                  >
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id} className="bg-soft-black">{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Service</label>
                   <select 
                     required
@@ -875,39 +856,24 @@ export default function App() {
                     ))}
                   </select>
                 </div>
-                <div className="space-y-4">
-                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Select Date</label>
-                  <div className="flex gap-3 overflow-x-auto pb-4 custom-scrollbar snap-x">
-                    {availableDates.map((d) => {
-                      const isSelected = bookingData.date === d.value;
-                      return (
-                        <button
-                          key={d.value}
-                          type="button"
-                          onClick={() => setBookingData({...bookingData, date: d.value, time: ''})}
-                          className={`
-                            flex-shrink-0 w-20 py-4 rounded-2xl border transition-all snap-start
-                            ${isSelected 
-                              ? 'bg-rose-gold border-rose-gold text-white shadow-lg scale-105' 
-                              : 'bg-white/5 border-white/10 text-white/70 hover:border-rose-gold/50 hover:bg-white/10'
-                            }
-                          `}
-                        >
-                          <span className="block text-[10px] uppercase font-bold tracking-tighter opacity-60 mb-1">{d.month}</span>
-                          <span className="block text-xl font-serif font-bold mb-1">{d.day}</span>
-                          <span className="block text-[10px] uppercase font-bold tracking-widest opacity-60">{d.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Date</label>
+                  <input 
+                    required
+                    type="date" 
+                    min={format(new Date(), 'yyyy-MM-dd')}
+                    value={bookingData.date}
+                    onChange={(e) => setBookingData({...bookingData, date: e.target.value, time: ''})}
+                    className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 focus:outline-none focus:border-rose-gold transition-colors text-white [&::-webkit-calendar-picker-indicator]:filter-[invert(1)]" 
+                  />
                 </div>
                 
-                <div className="md:col-span-2 space-y-4">
+                <div className="md:col-span-2 space-y-6">
                   <div className="flex flex-col space-y-1">
-                    <label className="text-xs font-bold uppercase tracking-widest text-champagne/60 ml-1">Select Available Time Slot</label>
-                    <p className="text-xs text-champagne/40 ml-1 italic">Appointments are available during our regular business hours (9:00 AM - 9:00 PM). Hours might differ during holidays.</p>
+                    <label className="text-[10px] font-bold uppercase tracking-[0.3em] text-rose-gold/80 ml-1">Select Time Slot</label>
+                    <p className="text-[10px] text-champagne/40 ml-1 uppercase tracking-widest">Business Hours: 9:00 AM - 9:00 PM</p>
                   </div>
-                  <div className="space-y-6 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                  <div className="space-y-8 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                     {groupedTimeSlots.map((group) => {
                       const isToday = bookingData.date === format(new Date(), 'yyyy-MM-dd');
                       const currentHour = new Date().getHours();
@@ -917,24 +883,25 @@ export default function App() {
                       const allSlotsUnavailable = group.slots.every(slot => {
                         const [slotH, slotM] = slot.value.split(':').map(Number);
                         const isPast = isToday && (slotH < currentHour || (slotH === currentHour && slotM <= currentMinute));
-                        const isExactBooked = existingBookings.some(b => b.time === slot.value);
-                        return isPast || isExactBooked;
+                        return isPast;
                       });
 
                       if (allSlotsUnavailable) return null; // Hide the hour group if fully booked/past
 
                       return (
-                        <div key={group.hourLabel} className="space-y-3">
-                          <h4 className="text-sm font-bold text-champagne/80 border-b border-white/10 pb-2">{group.hourLabel}</h4>
+                        <div key={group.hourLabel} className="space-y-4">
+                          <h4 className="text-[10px] font-bold text-champagne/40 uppercase tracking-[0.2em] flex items-center gap-3">
+                            <span>{group.hourLabel}</span>
+                            <div className="h-px flex-1 bg-white/5"></div>
+                          </h4>
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                             {group.slots.map((slot) => {
                               const isSelected = bookingData.time === slot.value;
-                              const isExactBooked = existingBookings.some(b => b.time === slot.value);
                               
                               const [slotH, slotM] = slot.value.split(':').map(Number);
                               const isPast = isToday && (slotH < currentHour || (slotH === currentHour && slotM <= currentMinute));
                               
-                              const isUnavailable = isExactBooked || isPast;
+                              const isUnavailable = isPast;
                               
                               return (
                                 <button
@@ -943,12 +910,12 @@ export default function App() {
                                   disabled={isUnavailable}
                                   onClick={() => setBookingData({...bookingData, time: slot.value})}
                                   className={`
-                                    py-2 rounded-lg text-sm font-medium transition-all border
-                                    ${isUnavailable 
-                                        ? 'bg-white/5 border-white/5 text-white/20 cursor-not-allowed line-through decoration-white/20'
-                                        : isSelected
-                                          ? 'bg-rose-gold border-rose-gold text-white shadow-lg scale-105'
-                                          : 'bg-white/10 border-white/10 text-white/70 hover:border-rose-gold/50 hover:bg-white/15'
+                                    py-3 px-4 rounded-xl border text-xs font-bold uppercase tracking-widest transition-all duration-300
+                                    ${isSelected 
+                                      ? 'bg-rose-gold border-rose-gold text-white shadow-[0_5px_15px_rgba(183,110,121,0.2)] scale-[1.02]' 
+                                      : isUnavailable
+                                        ? 'bg-white/5 border-white/5 text-white/10 cursor-not-allowed line-through'
+                                        : 'bg-white/5 border-white/10 text-champagne/70 hover:border-rose-gold/40 hover:bg-white/[0.08]'
                                     }
                                   `}
                                 >
@@ -997,18 +964,6 @@ export default function App() {
                   </button>
                 </div>
                 
-                {!user && (
-                  <div className="md:col-span-2 text-center mt-4">
-                    <p className="text-xs text-champagne/40 uppercase tracking-widest mb-3">Or sign in for faster booking</p>
-                    <button 
-                      type="button"
-                      onClick={signInWithGoogle}
-                      className="inline-flex items-center gap-2 text-champagne/80 hover:text-rose-gold transition-colors text-sm font-bold uppercase tracking-widest"
-                    >
-                      Sign in with Google
-                    </button>
-                  </div>
-                )}
               </form>
             )}
           </motion.div>
@@ -1133,153 +1088,6 @@ export default function App() {
                     Confirm
                   </button>
                 </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-      {/* My Bookings Modal */}
-      <AnimatePresence>
-        {showMyBookings && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowMyBookings(false)}
-              className="absolute inset-0 bg-soft-black/80 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative bg-white w-full max-w-2xl max-h-[80vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col"
-            >
-              <div className="p-6 sm:p-8 border-b border-gray-100 flex justify-between items-center">
-                <h3 className="text-2xl font-serif text-soft-black">My Bookings</h3>
-                <button 
-                  onClick={() => setShowMyBookings(false)}
-                  className="p-2 text-gray-400 hover:text-soft-black transition-colors rounded-full hover:bg-gray-100"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-              
-              <div className="p-6 sm:p-8 overflow-y-auto flex-1 custom-scrollbar bg-gray-50/50">
-                {isLoadingBookings ? (
-                  <div className="flex justify-center items-center py-12">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-rose-gold"></div>
-                  </div>
-                ) : myBookings.length === 0 ? (
-                  <div className="text-center py-12">
-                    <CalendarIcon className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">You don't have any bookings yet.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-8">
-                    {/* Upcoming Bookings */}
-                    {(() => {
-                      const upcoming = myBookings.filter(b => {
-                        const bookingDate = new Date(`${b.date}T${b.time}`);
-                        return bookingDate >= new Date();
-                      });
-                      
-                      if (upcoming.length === 0) return null;
-                      
-                      return (
-                        <div>
-                          <h4 className="text-sm font-bold uppercase tracking-widest text-rose-gold mb-4 flex items-center gap-2">
-                            <Sparkles className="w-4 h-4" /> Upcoming Appointments
-                          </h4>
-                          <div className="space-y-4">
-                            {upcoming.map(booking => (
-                              <div key={booking.id} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-                                  <div>
-                                    <h5 className="font-serif text-lg text-soft-black mb-1">{booking.serviceName}</h5>
-                                    <div className="flex items-center gap-4 text-sm text-gray-500">
-                                      <span className="flex items-center gap-1">
-                                        <CalendarIcon className="w-4 h-4" />
-                                        {format(parseISO(booking.date), 'MMM dd, yyyy')}
-                                      </span>
-                                      <span className="flex items-center gap-1">
-                                        <Clock className="w-4 h-4" />
-                                        {(() => {
-                                          const [h, m] = booking.time.split(':');
-                                          const hour = parseInt(h);
-                                          const ampm = hour >= 12 ? 'PM' : 'AM';
-                                          const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
-                                          return `${displayHour}:${m} ${ampm}`;
-                                        })()}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                                      booking.status === 'confirmed' ? 'bg-green-100 text-green-700' : 
-                                      booking.status === 'cancelled' ? 'bg-red-100 text-red-700' : 
-                                      'bg-amber-100 text-amber-700'
-                                    }`}>
-                                      {booking.status || 'Pending'}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Past Bookings */}
-                    {(() => {
-                      const past = myBookings.filter(b => {
-                        const bookingDate = new Date(`${b.date}T${b.time}`);
-                        return bookingDate < new Date();
-                      });
-                      
-                      if (past.length === 0) return null;
-                      
-                      return (
-                        <div>
-                          <h4 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4">Past Appointments</h4>
-                          <div className="space-y-4 opacity-75">
-                            {past.map(booking => (
-                              <div key={booking.id} className="bg-white p-5 rounded-2xl border border-gray-100">
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-                                  <div>
-                                    <h5 className="font-serif text-lg text-gray-600 mb-1">{booking.serviceName}</h5>
-                                    <div className="flex items-center gap-4 text-sm text-gray-400">
-                                      <span className="flex items-center gap-1">
-                                        <CalendarIcon className="w-4 h-4" />
-                                        {format(parseISO(booking.date), 'MMM dd, yyyy')}
-                                      </span>
-                                      <span className="flex items-center gap-1">
-                                        <Clock className="w-4 h-4" />
-                                        {(() => {
-                                          const [h, m] = booking.time.split(':');
-                                          const hour = parseInt(h);
-                                          const ampm = hour >= 12 ? 'PM' : 'AM';
-                                          const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
-                                          return `${displayHour}:${m} ${ampm}`;
-                                        })()}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-gray-100 text-gray-500">
-                                      Completed
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
               </div>
             </motion.div>
           </div>
